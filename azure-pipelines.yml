@@ -150,6 +150,18 @@ stages:
 
                     cd "$DEPLOY_DIR"
 
+                    # Recreate the gateway so newly configured TLS mounts and
+                    # environment-specific ports are applied before reloading it.
+                    docker compose \
+                      --env-file environments/production.env \
+                      -p platform-production \
+                      up -d --no-deps --force-recreate gateway
+
+                    docker compose \
+                      --env-file environments/production.env \
+                      -p platform-production \
+                      exec -T gateway nginx -t
+
                     for SERVICE in api-1 api-2; do
                       docker compose \
                         --env-file environments/staging.env \
@@ -295,11 +307,11 @@ stages:
                       -p platform-production \
                       up -d --no-deps outbox-relay worker-1 worker-2
 
-                    curl --fail --silent --show-error \
-                      http://127.0.0.1:8090/ready
+                    curl --fail --silent --show-error --insecure \
+                      https://127.0.0.1:9443/ready
 
-                    WHOAMI="$(curl --fail --silent --show-error \
-                      http://127.0.0.1:8090/whoami)"
+                    WHOAMI="$(curl --fail --silent --show-error --insecure \
+                      https://127.0.0.1:9443/whoami)"
 
                     echo "$WHOAMI"
                     echo "$WHOAMI" | grep -F '$(Build.SourceVersion)'
