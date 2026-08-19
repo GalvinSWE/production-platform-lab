@@ -195,3 +195,116 @@ stages:
                     trap - ERR
                     echo "Staging deployment succeeded: $IMAGE_NAME"
                   displayName: Load, roll out, smoke test, and rollback on failure
+
+  - stage: DeployProduction
+    displayName: Deploy approved image to production
+    dependsOn: Build
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - deployment: DeployProduction
+        displayName: Roll out on production-lab
+        environment: production
+        pool:
+          name: environment-1-47b27a9a-5fe6-4dbb-942f-35db7b28806f
+          demands:
+            - Agent.Name -equals production-lab
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: none
+
+                - download: current
+                  artifact: docker-image
+                  displayName: Download approved Docker image
+
+                - bash: |
+                    set -Eeuo pipefail
+
+                    DEPLOY_DIR=/home/ubuntu/platform-deploy
+                    ENV_FILE="$DEPLOY_DIR/environments/production.env"
+                    IMAGE_NAME="$(imageRepository):$(imageTag)"
+                    IMAGE_ARCHIVE="$(find "$(Pipeline.Workspace)/docker-image" -type f -name '*.tar.gz' -print -quit)"
+
+                    test -d "$DEPLOY_DIR"
+                    test -f "$ENV_FILE"
+                    test -n "$IMAGE_ARCHIVE"
+
+                    gzip -dc "$IMAGE_ARCHIVE" | docker load
+
+                    IMAGE_ARCHITECTURE="$(docker image inspect "$IMAGE_NAME" --format '{{.Architecture}}')"
+                    test "$IMAGE_ARCHITECTURE" = arm64
+
+                    OLD_IMAGE="$(sed -n 's/^APP_IMAGE=//p' "$ENV_FILE" | tail -n 1)"
+                    OLD_VERSION="$(sed -n 's/^APP_VERSION=//p' "$ENV_FILE" | tail -n 1)"
+
+                    rollback() {
+                      echo "Production deployment failed; rolling back to $OLD_IMAGE"
+                      sed -i "s|^APP_IMAGE=.*|APP_IMAGE=$OLD_IMAGE|" "$ENV_FILE"
+                      sed -i "s|^APP_VERSION=.*|APP_VERSION=$OLD_VERSION|" "$ENV_FILE"
+
+                      cd "$DEPLOY_DIR"
+                      docker compose \
+                        --env-file environments/production.env \
+                        -p platform-production \
+                        up -d --no-deps \
+                        api-1 api-2 outbox-relay worker-1 worker-2
+
+                      docker compose \
+                        --env-file environments/production.env \
+                        -p platform-production \
+                        restart gateway
+                    }
+
+                    trap rollback ERR
+
+                    sed -i "s|^APP_IMAGE=.*|APP_IMAGE=$IMAGE_NAME|" "$ENV_FILE"
+                    sed -i "s|^APP_VERSION=.*|APP_VERSION=$(Build.SourceVersion)|" "$ENV_FILE"
+
+                    cd "$DEPLOY_DIR"
+
+                    for SERVICE in api-1 api-2; do
+                      docker compose \
+                        --env-file environments/production.env \
+                        -p platform-production \
+                        up -d --no-deps "$SERVICE"
+
+                      CONTAINER="platform-production-${SERVICE}-1"
+
+                      for ATTEMPT in $(seq 1 30); do
+                        STATUS="$(docker inspect "$CONTAINER" --format '{{.State.Health.Status}}' 2>/dev/null || true)"
+                        if [ "$STATUS" = healthy ]; then
+                          break
+                        fi
+
+                        if [ "$ATTEMPT" -eq 30 ]; then
+                          docker logs "$CONTAINER" --tail 100
+                          exit 1
+                        fi
+
+                        sleep 2
+                      done
+
+                      docker compose \
+                        --env-file environments/production.env \
+                        -p platform-production \
+                        exec -T gateway nginx -s reload
+                    done
+
+                    docker compose \
+                      --env-file environments/production.env \
+                      -p platform-production \
+                      up -d --no-deps outbox-relay worker-1 worker-2
+
+                    curl --fail --silent --show-error \
+                      http://127.0.0.1:8090/ready
+
+                    WHOAMI="$(curl --fail --silent --show-error \
+                      http://127.0.0.1:8090/whoami)"
+
+                    echo "$WHOAMI"
+                    echo "$WHOAMI" | grep -F '$(Build.SourceVersion)'
+
+                    trap - ERR
+                    echo "Production deployment succeeded: $IMAGE_NAME"
+                  displayName: Load, roll out, smoke test, and rollback on failure
