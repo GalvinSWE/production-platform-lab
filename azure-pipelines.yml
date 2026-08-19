@@ -111,7 +111,7 @@ stages:
                     DEPLOY_DIR=/home/ubuntu/platform-deploy
                     ENV_FILE="$DEPLOY_DIR/environments/staging.env"
                     IMAGE_NAME="$(imageRepository):$(imageTag)"
-                    IMAGE_ARCHIVE="$(find "$(Pipeline.Workspace)/docker-image" -type f -name '*.tar.gz' -print -quit)"
+                    IMAGE_ARCHIVE="$(Pipeline.Workspace)/docker-image/$(imageRepository)-$(Build.BuildId).tar.gz"
 
                     test -d "$DEPLOY_DIR"
                     test -f "$ENV_FILE"
@@ -223,7 +223,7 @@ stages:
                     DEPLOY_DIR=/home/ubuntu/platform-deploy
                     ENV_FILE="$DEPLOY_DIR/environments/production.env"
                     IMAGE_NAME="$(imageRepository):$(imageTag)"
-                    IMAGE_ARCHIVE="$(find "$(Pipeline.Workspace)/docker-image" -type f -name '*.tar.gz' -print -quit)"
+                    IMAGE_ARCHIVE="$(Pipeline.Workspace)/docker-image/$(imageRepository)-$(Build.BuildId).tar.gz"
 
                     test -d "$DEPLOY_DIR"
                     test -f "$ENV_FILE"
