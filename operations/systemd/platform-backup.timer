@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the platform PostgreSQL backup every hour
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+RandomizedDelaySec=30
+Unit=platform-backup.service
+
+[Install]
+WantedBy=timers.target
