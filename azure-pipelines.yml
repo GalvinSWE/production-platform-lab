@@ -203,11 +203,10 @@ stages:
     jobs:
       - deployment: DeployProduction
         displayName: Roll out on production-lab
-        environment: production
-        pool:
-          name: environment-1-47b27a9a-5fe6-4dbb-942f-35db7b28806f
-          demands:
-            - Agent.Name -equals production-lab
+        environment:
+          name: production
+          resourceType: VirtualMachine
+          resourceName: production-lab
         strategy:
           runOnce:
             deploy:
