@@ -50,11 +50,18 @@ stages:
             clean: true
 
           - script: |
-              docker build \
+              docker buildx create \
+                --name pipeline-arm64-builder \
+                --driver docker-container \
+                --use
+
+              docker buildx build \
+                --platform linux/arm64 \
+                --load \
                 --label org.opencontainers.image.revision=$(Build.SourceVersion) \
                 --tag $(imageRepository):$(imageTag) \
                 .
-            displayName: Build Docker image
+            displayName: Build ARM64 Docker image
 
           - script: |
               mkdir -p $(Build.ArtifactStagingDirectory)
@@ -64,6 +71,11 @@ stages:
                 --format '{{.Id}}' \
                 > $(Build.ArtifactStagingDirectory)/image-id.txt
 
+              docker image inspect \
+                $(imageRepository):$(imageTag) \
+                --format '{{.Architecture}}' \
+                > $(Build.ArtifactStagingDirectory)/image-architecture.txt
+
               docker save $(imageRepository):$(imageTag) | gzip \
                 > $(Build.ArtifactStagingDirectory)/$(imageRepository)-$(Build.BuildId).tar.gz
             displayName: Package immutable image
@@ -71,3 +83,105 @@ stages:
           - publish: $(Build.ArtifactStagingDirectory)
             artifact: docker-image
             displayName: Publish Docker image artifact
+
+  - stage: DeployStaging
+    displayName: Deploy immutable image to staging
+    dependsOn: Build
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/develop'))
+    jobs:
+      - deployment: DeployProductionLab
+        displayName: Roll out on production-lab
+        environment:
+          name: staging
+          resourceType: VirtualMachine
+          resourceName: production-lab
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: none
+
+                - download: current
+                  artifact: docker-image
+                  displayName: Download tested Docker image
+
+                - bash: |
+                    set -Eeuo pipefail
+
+                    DEPLOY_DIR=/home/ubuntu/platform-deploy
+                    ENV_FILE="$DEPLOY_DIR/environments/staging.env"
+                    IMAGE_NAME="$(imageRepository):$(imageTag)"
+                    IMAGE_ARCHIVE="$(find "$(Pipeline.Workspace)/docker-image" -type f -name '*.tar.gz' -print -quit)"
+
+                    test -d "$DEPLOY_DIR"
+                    test -f "$ENV_FILE"
+                    test -n "$IMAGE_ARCHIVE"
+
+                    gzip -dc "$IMAGE_ARCHIVE" | docker load
+
+                    IMAGE_ARCHITECTURE="$(docker image inspect "$IMAGE_NAME" --format '{{.Architecture}}')"
+                    test "$IMAGE_ARCHITECTURE" = arm64
+
+                    OLD_IMAGE="$(sed -n 's/^APP_IMAGE=//p' "$ENV_FILE" | tail -n 1)"
+                    OLD_VERSION="$(sed -n 's/^APP_VERSION=//p' "$ENV_FILE" | tail -n 1)"
+
+                    rollback() {
+                      echo "Deployment failed; rolling staging back to $OLD_IMAGE"
+                      sed -i "s|^APP_IMAGE=.*|APP_IMAGE=$OLD_IMAGE|" "$ENV_FILE"
+                      sed -i "s|^APP_VERSION=.*|APP_VERSION=$OLD_VERSION|" "$ENV_FILE"
+
+                      cd "$DEPLOY_DIR"
+                      docker compose \
+                        --env-file environments/staging.env \
+                        -p platform-staging \
+                        up -d --no-deps \
+                        api-1 api-2 outbox-relay worker-1 worker-2
+                    }
+
+                    trap rollback ERR
+
+                    sed -i "s|^APP_IMAGE=.*|APP_IMAGE=$IMAGE_NAME|" "$ENV_FILE"
+                    sed -i "s|^APP_VERSION=.*|APP_VERSION=$(Build.SourceVersion)|" "$ENV_FILE"
+
+                    cd "$DEPLOY_DIR"
+
+                    for SERVICE in api-1 api-2; do
+                      docker compose \
+                        --env-file environments/staging.env \
+                        -p platform-staging \
+                        up -d --no-deps "$SERVICE"
+
+                      CONTAINER="platform-staging-${SERVICE}-1"
+
+                      for ATTEMPT in $(seq 1 30); do
+                        STATUS="$(docker inspect "$CONTAINER" --format '{{.State.Health.Status}}' 2>/dev/null || true)"
+                        if [ "$STATUS" = healthy ]; then
+                          break
+                        fi
+
+                        if [ "$ATTEMPT" -eq 30 ]; then
+                          docker logs "$CONTAINER" --tail 100
+                          exit 1
+                        fi
+
+                        sleep 2
+                      done
+                    done
+
+                    docker compose \
+                      --env-file environments/staging.env \
+                      -p platform-staging \
+                      up -d --no-deps outbox-relay worker-1 worker-2
+
+                    curl --fail --silent --show-error --insecure \
+                      https://127.0.0.1:8443/ready
+
+                    WHOAMI="$(curl --fail --silent --show-error --insecure \
+                      https://127.0.0.1:8443/whoami)"
+
+                    echo "$WHOAMI"
+                    echo "$WHOAMI" | grep -F '$(Build.SourceVersion)'
+
+                    trap - ERR
+                    echo "Staging deployment succeeded: $IMAGE_NAME"
+                  displayName: Load, roll out, smoke test, and rollback on failure
