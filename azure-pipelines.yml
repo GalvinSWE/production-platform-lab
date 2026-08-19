@@ -136,6 +136,11 @@ stages:
                         -p platform-staging \
                         up -d --no-deps \
                         api-1 api-2 outbox-relay worker-1 worker-2
+
+                      docker compose \
+                        --env-file environments/staging.env \
+                        -p platform-staging \
+                        restart gateway
                     }
 
                     trap rollback ERR
@@ -166,6 +171,11 @@ stages:
 
                         sleep 2
                       done
+
+                      docker compose \
+                        --env-file environments/staging.env \
+                        -p platform-staging \
+                        exec -T gateway nginx -s reload
                     done
 
                     docker compose \
