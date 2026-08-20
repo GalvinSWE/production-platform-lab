@@ -26,5 +26,10 @@ Lab tổng quát để quan sát các thành phần của một hệ thống pro
 - Pinned container image digests
 - HTTPS gateway and host/network hardening
 - Azure Pipelines validation and immutable image packaging
+- Automatic staging deployment from `develop`
+- Manual production approval from `main`
+- HTTPS production smoke tests and automatic rollback
+- Controlled bad-image rollback verification
 
-Giai đoạn tiếp theo bổ sung triển khai staging tự động, smoke test, production approval và rollback trong Azure Pipelines.
+Lab nền tảng đã hoàn thành. Xem [Production runbook](operations/PRODUCTION-RUNBOOK.md)
+để khởi động, kiểm tra, deploy, rollback và xử lý sự cố.
