@@ -153,13 +153,13 @@ stages:
                     # Recreate the gateway so newly configured TLS mounts and
                     # environment-specific ports are applied before reloading it.
                     docker compose \
-                      --env-file environments/production.env \
-                      -p platform-production \
+                      --env-file environments/staging.env \
+                      -p platform-staging \
                       up -d --no-deps --force-recreate gateway
 
                     docker compose \
-                      --env-file environments/production.env \
-                      -p platform-production \
+                      --env-file environments/staging.env \
+                      -p platform-staging \
                       exec -T gateway nginx -t
 
                     for SERVICE in api-1 api-2; do

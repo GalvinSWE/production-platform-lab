@@ -1,6 +1,7 @@
 {
   "name": "production-platform-lab",
   "version": "1.0.0",
+  "description": "A reproducible Node.js platform for reliability, observability, deployment, and recovery experiments.",
   "private": true,
   "type": "module",
   "scripts": {

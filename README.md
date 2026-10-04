@@ -1,35 +1,70 @@
 # Production Platform Lab
 
-Lab tổng quát để quan sát các thành phần của một hệ thống production và cách chúng kết nối với nhau.
+A reproducible Node.js platform for practicing the operational concerns that appear after an API moves beyond a single process and database.
 
-## Giai đoạn hiện tại
+The lab focuses on correctness, failure recovery, observability, and controlled delivery rather than product-specific business features.
 
-- Generic HTTP API with PostgreSQL access
-- Health check và deployment identity
-- Automated tests
-- Immutable Docker image
-- Database readiness, item read/write endpoints, and schema migration
-- Coordinated database connection/query timeouts for fast readiness failures
-- Shared Redis cache with cache-aside reads and write invalidation
-- Graceful cache degradation and PostgreSQL pool recovery after connection loss
-- Durable RabbitMQ events and an acknowledged background worker
-- Transactional outbox relay and idempotent item creation
-- S3-compatible object storage with PostgreSQL file metadata
-- Reproducible multi-container deployment with Docker Compose
-- Isolated Staging and Production Compose projects
-- Prometheus application metrics for traffic, latency, cache, and Node.js runtime
-- Prometheus, Grafana, Node Exporter, and cAdvisor monitoring stack
-- Loki and Alloy centralized logging
-- Tempo and OpenTelemetry distributed tracing
-- Automated PostgreSQL backup and recovery exercises
+## Architecture
+
+```text
+HTTPS gateway
+      │
+      ├─ API instance 1 ─┐
+      └─ API instance 2 ─┼─ PostgreSQL
+                         ├─ Redis cache
+outbox relay ─ RabbitMQ ─┼─ background workers
+                         └─ S3-compatible object storage
+
+applications ─ OpenTelemetry ─ Tempo
+applications ─ Prometheus metrics ─ Grafana
+containers   ─ Alloy logs ─ Loki
+```
+
+## Engineering concerns demonstrated
+
+- PostgreSQL readiness, connection/query timeouts, schema migrations, and backup recovery
+- Cache-aside reads, write invalidation, and graceful Redis degradation
+- Transactional outbox delivery and idempotent item creation
+- Durable RabbitMQ events and acknowledged background processing
+- S3-compatible object storage with PostgreSQL metadata
+- Prometheus metrics, Grafana dashboards, Loki logs, and Tempo traces
 - File-based runtime secrets and secret rotation
-- Pinned container image digests
-- HTTPS gateway and host/network hardening
-- Azure Pipelines validation and immutable image packaging
-- Automatic staging deployment from `develop`
-- Manual production approval from `main`
-- HTTPS production smoke tests and automatic rollback
-- Controlled bad-image rollback verification
+- Immutable, digest-pinned container images
+- Isolated staging and production Compose projects
+- Automated validation, staging rollout, production approval, smoke tests, and rollback
 
-Lab nền tảng đã hoàn thành. Xem [Production runbook](operations/PRODUCTION-RUNBOOK.md)
-để khởi động, kiểm tra, deploy, rollback và xử lý sự cố.
+## Source verification
+
+```bash
+npm ci
+npm test
+docker build -t production-platform-api:local .
+```
+
+The automated tests exercise health/readiness endpoints, deployment identity, metrics, idempotent writes, cache invalidation, outbox behavior, and file upload/download flows without requiring the full platform.
+
+## Full environment
+
+Running the complete platform requires environment files, local secret files, TLS material, external Docker networks, and persistent volumes. Example environment files are included; real credentials and certificates are intentionally excluded.
+
+See the [Production Runbook](operations/PRODUCTION-RUNBOOK.md) for deployment, smoke testing, monitoring, rollback, backup, recovery, and incident-closeout procedures.
+
+## Delivery flow
+
+```text
+feature branch
+  → pull request to develop
+  → tests and immutable image build
+  → staging rollout and smoke test
+  → pull request to main
+  → manual production approval
+  → rolling deployment
+  → HTTPS smoke test
+  → success or automatic rollback
+```
+
+## Safety
+
+- Real `.env` files, passwords, private keys, certificates, backups, and image archives are ignored.
+- The checked-in environment files contain paths and non-sensitive local defaults only.
+- This repository is a lab environment, not a template that should be deployed unchanged to the public internet.
